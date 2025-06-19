@@ -1,0 +1,19 @@
+# virtual environment
+.venv/
+env/
+venv/
+
+# python version from pyenv
+.python-version
+
+# python chache
+__pycache__/
+
+.DS_Store
+
+# jupyter
+.ipynb_checkpoints/
+
+# source data
+assets/
+
