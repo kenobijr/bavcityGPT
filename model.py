@@ -9,7 +9,7 @@ from dataclasses import dataclass
 @dataclass
 class GPTconfig:
     """
-    - configuration class for model architecture params
+    - configuration class for model architecture hyperparameters
     - mandatory as input to instanciate core GTP class
     - training & sampling config params in separate files in config dir
     """
@@ -24,21 +24,23 @@ class GPTconfig:
     lm_head_bias: bool = False
 
 
-
-
-# single self-attention head; called from multi-head-attention class
 class Head(nn.Module):
+    """
+    - single self-attention head; 
+    - called from multi-head-attention class
+    - pre-registered full-size buffer for triangular masking
+    """
     
-    def __init__(self, config:GPTconfig, h_size):
+    def __init__(self, config: GPTconfig, h_size: int):
         super().__init__()
-        self.query = nn.Linear(in_features=n_embd, out_features=h_size, bias=config.a_bias)
-        self.key = nn.Linear(in_features=n_embd, out_features=h_size, bias=config.a_bias)
-        self.value = nn.Linear(in_features=n_embd, out_features=h_size, bias=config.a_bias)
-        # helper matrix for triangular masking; pre-registered as full-size buffer for performance; all zero values above the diagonal
-        self.register_buffer("tril", torch.tril(torch.ones(context_len, context_len)))
-        self.drop = nn.Dropout(dropout)
+        self.query = nn.Linear(config.n_embd, h_size, bias=config.a_bias)
+        self.key = nn.Linear(config.n_embd, h_size, bias=config.a_bias)
+        self.value = nn.Linear(config.n_embd, h_size, bias=config.a_bias)
+        # helper matrix for triangular masking; all zero values above diagonal
+        self.register_buffer("tril", torch.tril(torch.ones(config.context_len, config.context_len)))
+        self.drop = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         B, T, C = x.shape
         # B, T, H
         q = self.query(x)
@@ -54,12 +56,17 @@ class Head(nn.Module):
         return out
     
 
-# multiple heads of self-attention in parallel
 class MultiHeadAttention(nn.Module):
+    """
+    - steering multiple heads of self-attention in parallel
+    - n_embd / n_head must have no remainder
+    """
     
     def __init__(self, config:GPTconfig, n_head, head_size):
         super().__init__()
-        self.heads = nn.ModuleList( Head(head_size) for _ in range(n_head))
+        assert config.n_embd % config.n_head == 0
+        self.head_size: int = config.n_embd // config.n_head
+        self.heads = nn.ModuleList(Head(config, self.head_size) for _ in range(config.n_head))
         # linear projection layer to blend all cat head outputs
         self.proj = nn.Linear(n_embd, n_embd, bias=config.a_bias)
         self.drop = nn.Dropout(dropout)
@@ -92,8 +99,7 @@ class TransformerBlock(nn.Module):
     
     def __init__(self):
         super().__init__()
-        head_size = n_embd // n_head
-        self.multi_head_sa = MultiHeadAttention(n_head, head_size)
+        self.multi_head_sa = MultiHeadAttention(config)
         self.ffw = Ffw()
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
