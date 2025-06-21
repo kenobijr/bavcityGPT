@@ -26,11 +26,11 @@ class GPTconfig:
 
 class Head(nn.Module):
     """
-    - single self-attention head; 
+    - single self-attention head
     - called from multi-head-attention class
     - pre-registered full-size buffer for triangular masking
     """
-    
+
     def __init__(self, config: GPTconfig, h_size: int):
         super().__init__()
         self.query = nn.Linear(config.n_embd, h_size, bias=config.a_bias)
@@ -38,43 +38,42 @@ class Head(nn.Module):
         self.value = nn.Linear(config.n_embd, h_size, bias=config.a_bias)
         # helper matrix for triangular masking; all zero values above diagonal
         self.register_buffer("tril", torch.tril(torch.ones(config.context_len, config.context_len)))
-        self.drop = nn.Dropout(config.dropout)
+        self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x) -> torch.Tensor:
         B, T, C = x.shape
-        # B, T, H
-        q = self.query(x)
-        k = self.key(x)
-        # B, T, T
-        wei = q @ torch.transpose(k, dim0=-1, dim1=-2) * C**-0.5
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
-        wei = F.softmax(wei, dim=-1)
-        wei = self.drop(wei)
-        # B, T, H
-        v = self.value(x)
-        out = wei @ v
+        q = self.query(x)  # B,T,H
+        k = self.key(x)  # B,T,H
+        wei = q @ torch.transpose(k, dim0=-1, dim1=-2) * C**-0.5  # B,T,T
+        wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))  # B,T,T
+        wei = F.softmax(wei, dim=-1)  # B,T,T
+        # dropout after softmax
+        wei = self.dropout(wei)  # B,T,T
+        v = self.value(x)  # B,T,H
+        out = wei @ v  # B,T,H
         return out
-    
+   
 
 class MultiHeadAttention(nn.Module):
     """
     - steering multiple heads of self-attention in parallel
+    - returning cat heads output after 
     - n_embd / n_head must have no remainder
     """
     
-    def __init__(self, config:GPTconfig, n_head, head_size):
+    def __init__(self, config: GPTconfig):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         self.head_size: int = config.n_embd // config.n_head
         self.heads = nn.ModuleList(Head(config, self.head_size) for _ in range(config.n_head))
         # linear projection layer to blend all cat head outputs
-        self.proj = nn.Linear(n_embd, n_embd, bias=config.a_bias)
-        self.drop = nn.Dropout(dropout)
+        self.proj = nn.Linear(config.n_embd, config.n_embd, bias=config.a_bias)
+        self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        # cat / stack each head's out_features along last dim to total of n_embd out_features
+        # cat each head out along last dim
         out = torch.cat([head(x) for head in self.heads], dim=-1)
-        out = self.drop(self.proj(out))
+        out = self.dropout(self.proj(out))
         return out
     
 
@@ -97,10 +96,10 @@ class Ffw(nn.Module):
 # transformer block: communication in multi-head-attention, then computation in ffw layers
 class TransformerBlock(nn.Module):
     
-    def __init__(self):
+    def __init__(self, config: GPTconfig):
         super().__init__()
         self.multi_head_sa = MultiHeadAttention(config)
-        self.ffw = Ffw()
+        self.ffw = Ffw(config)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
     
